@@ -50,6 +50,19 @@ class InstructorEvent
                                         $startdate.ToString("d-MMM-yyyy"), 
                                         $enddate.ToString("d-MMM-yyyy")
    } # FYWeekOfYear
+
+   [InstructorEvent] Copy()
+   {
+        return [InstructorEvent]::new($this.Instructor, 
+                                    $this.start, 
+                                    $this.end, 
+                                    $this.AsOf, 
+                                    $this.class, 
+                                    $this.course, 
+                                    $this.room, 
+                                    $this.lesson, 
+                                    $this.role)
+   } # Copy
      
    # Constructor
    InstructorEvent ([string]   $Instructor, 
@@ -79,8 +92,6 @@ class InstructorEvent
                             {$_ -le 9} {$this.start.Year}
                             Default {$this.start.Year + 1 }
                         } # switch
-       $this.CYWeek     = $this.CYWeekOfYear()
-       $this.FYWeek     = $this.FYWeekOfYear()  
 
    } #Constructor Definition
 
@@ -90,7 +101,7 @@ class InstructorEvent
 } #Class Defition
 
 #This function is used to call the constructor so we can use a hashtable to create objects (splatting)
-function New-SchedEvent 
+function New-InstructorEvent 
 {
     param (
         [string]   $Instructor, 
@@ -105,7 +116,7 @@ function New-SchedEvent
           ) # param
     [InstructorEvent]::new($Instructor, $start, $end, $AsOf, $class, $course, $room, $lesson, $role)
     
-} #function New-SchedEvent
+} #function New-InstructorEvent
 
 <#
 .Synopsis
@@ -186,6 +197,12 @@ function Import-ExcelSched
         [string]
         $AliasFile,
 
+        # checks instructor names against this array of instructor names. If not  in this array,
+        # event is still created/returned but identified in the results file.
+        [parameter(ValueFromPipelineByPropertyName=$true)]
+        [string[]]
+        $InstructorWhiteList,
+
         # Date the schedule was publised.
         #Make this mandatory
         [Parameter(ValueFromPipelineByPropertyName=$true)]
@@ -202,13 +219,10 @@ function Import-ExcelSched
         $ResultsFile = "$($env:TEMP)\SchedImportResults.txt"
         # Remove results file from previous imports and initialize file.
         If (Test-Path -Path $ResultsFile){Remove-Item -Path $ResultsFile}
-
     } # Begin
 
     Process
     {        
-
-
         "`nResults from importing {0}:" -f $Path  |
             Out-File -FilePath $ResultsFile -Append
         
@@ -295,7 +309,7 @@ function Import-ExcelSched
             $Date = ($objWorksheet.Cells.Cells($Day.Row, $day.Column + 2).text).trim()
             # Making sure the value can be converted to a datetime object. Moving to next if so...
             Try {$Date = Get-Date -Date $Date}
-            Catch { "$Address : Can't convert $Date value to a datetime object" | 
+            Catch { "$Address : Can't convert `"$Date`" value to a datetime object" | 
                         Out-File -FilePath $ResultsFile -Append
                     $Day = $NextDay
                     $Address = $Day.Address(0,0,1,1)
@@ -329,7 +343,7 @@ function Import-ExcelSched
                     $Eventht.end      = Get-Date @DayHT -Hour $endHour   -Minute $endMin   -Second 0
                 }
                 Catch {
-                    "$Address : Can't convert date/time {0} - {1}" -f $objWorksheet.Cells.Cells($row, 2).Text, 
+                    "$Address : Can't convert date/time `"{0}`" - `"{1}`"" -f $objWorksheet.Cells.Cells($row, 2).Text, 
                                                                       $objWorksheet.Cells.Cells($row, 3).Text  |
                         Out-File -FilePath $ResultsFile -Append
                     CONTINUE
@@ -350,8 +364,12 @@ function Import-ExcelSched
                         $Eventht.Instructor = $alias | 
                             Where-Object {$_.alias -eq $Eventht.Instructor} | 
                                 Select-Object -ExpandProperty Name
-                    } # if alias                    
-                    New-SchedEvent @Eventht # Return event object
+                    } # if alias
+                    if ($InstructorWhiteList -and $eventht.instructor -notin $InstructorWhiteList) {
+                        $eventht.instructor + " is not a valid instructor name. " + $Address |
+                            Out-File -FilePath $ResultsFile -Append -Force
+                    }                    
+                    New-InstructorEvent @Eventht # Return event object
                     $EventsCreated++
                 } # foreach Primary Instructor
 
@@ -373,7 +391,11 @@ function Import-ExcelSched
                 If ($Secondary -notin $MIR -and $Secondary -ne "" -and $Secondary -ne "ISSO") {
                     $Eventht.role       = "Secondary"
                     $Eventht.instructor = $Secondary
-                    New-SchedEvent @Eventht # Return object from function
+                    if ($InstructorWhiteList -and $eventht.instructor -notin $InstructorWhiteList) {
+                        $eventht.instructor + " is not a valid instructor name. " + $Address |
+                            Out-File -FilePath $ResultsFile -Append -Force
+                    }   
+                    New-InstructorEvent @Eventht # Return object from function
                     $EventsCreated++
                 } # If just secondary
 
@@ -389,7 +411,11 @@ function Import-ExcelSched
                     If ($SupportInstructor -eq $Secondary){
                         $Eventht.role       = "Secondary/Support"
                         $Eventht.Instructor = $Secondary
-                        New-SchedEvent @Eventht # Return object from function
+                        if ($InstructorWhiteList -and $eventht.instructor -notin $InstructorWhiteList) {
+                            $eventht.instructor + " is not a valid instructor name. " + $Address |
+                                Out-File -FilePath $ResultsFile -Append -Force
+                        }   
+                        New-InstructorEvent @Eventht # Return object from function
                         $EventsCreated++
                         CONTINUE
                     } # if multi-role
@@ -400,7 +426,11 @@ function Import-ExcelSched
                     if ($SupportInstructor -like "*Evaluator*" -or $SupportInstructor -like "DOM*" -or $SupportInstructor -like "CCV*") {
                         CONTINUE 
                     } # if
-                    New-SchedEvent @Eventht # Return object from function
+                    if ($InstructorWhiteList -and $eventht.instructor -notin $InstructorWhiteList) {
+                        $eventht.instructor + " is not a valid instructor name. " + $Address |
+                            Out-File -FilePath $ResultsFile -Append -Force
+                    }   
+                    New-InstructorEvent @Eventht # Return object from function
                     $EventsCreated++
                 } # foreach support instructor
             } # foreach row in the day
@@ -457,7 +487,7 @@ function Measure-Events
     param (
         # array of events to report on. Filter the events as needed prior to calling.
         [Parameter(Mandatory=$true)]
-        [InstructorEvent[]]$events,
+        [InstructorEvent[]]$InstructorEvents,
 
         # Set how to group the summary
         [Parameter(Mandatory=$true)]
@@ -476,6 +506,9 @@ function Measure-Events
     ) # param block
 
     Process {
+        
+        # Make a deep copy since we will be modifying the objects
+        $events = @($InstructorEvents | ForEach-Object {$_.copy()})
 
         # Finding the earliest event in the array
         [datetime]$firsteventdate = $events | 
@@ -549,7 +582,7 @@ function Measure-Events
            
             # Calculating group totals
             $gpdays  = ($endgroupdate - $startgroupdate).TotalDays + 1
-            $GpCapacity = $totaldays * $DailyCapacity
+            $GpCapacity = $gpdays * $DailyCapacity
             $CRUtilization = $GpCapacity * $UtilizationRate
             "{0}" -f $gp
             "Days: {0:N0}`tCapacity: {1:N2} hours`tClassroom Utilization: {2:N2} hours" -f $gpdays, $GpCapacity, $CRUtilization
@@ -613,26 +646,125 @@ function Measure-Events
     } # Process
 } # function Measure-Events
 
-function Remove-OutlookEvent {
+function Export-ICS
+{
     [CmdletBinding()]
     param (
-        
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true)]
+        [InstructorEvent]
+        $InstructorEvent,
+
+        [Parameter(Mandatory=$true)]
+        [string]
+        $Path
+    )
+    Begin {
+
+        # file header information
+        $Calendar = "BEGIN:VCALENDAR`r`nVERSION:2.0`r`nPRODID:-//INSTRUCTOR_UTILIZATION_SCRIPT//EN"
+
+    } #Begin
+    Process {
+        $Subject = "{0} {1} `r`n {2} / {3} `r`n / {4}" -f $InstructorEvent.course,
+                                                $InstructorEvent.class,
+                                                $InstructorEvent.lesson,
+                                                $InstructorEvent.Role,
+                                                $InstructorEvent.AsOf.ToString("d")
+        $DateStamp = $InstructorEvent.AsOf.ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+        $start     = $InstructorEvent.start.ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+        $end       = $InstructorEvent.end.ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+        $Calendar += "`r`nBEGIN:VEVENT"
+        $Calendar += "`r`nSUMMARY:$Subject"
+        $Calendar += "`r`nUID:$([guid]::NewGuid())"
+        $Calendar += "`r`nSEQUENCE:0"
+        $Calendar += "`r`nSTATUS:CONFIRMED"
+        $Calendar += "`r`nTRANSP:TRANSPARENT"
+        $Calendar += "`r`nDTSTART:$start"
+        $Calendar += "`r`nDTEND:$end"
+        $Calendar += "`r`nDTSTAMP:$DateStamp"
+        $Calendar += "`r`nCATEGORIES:$($InstructorEvent.Role)"
+        $Calendar += "`r`nLOCATION:$($InstructorEvent.room)"
+        $Calendar += "`r`nDESCRIPTION:$subject"
+        $Calendar += "`r`nEND:VEVENT"
+    } # Process
+    End {
+        $Calendar += "`r`nEND:VCALENDAR"
+        Set-Content -Path $Path -Value $Calendar -Force
+    } # End
+} # Function export-ics
+
+function Remove-OutlookEvent 
+{
+    [CmdletBinding()]
+    param (
+        # Full path of calendar folder to use. If doesn't exist, it will create it under the default folder.
+        [Parameter(Mandatory=$true)]
+        [string]
+        $CalendarFolder,
+
+        # Instructor Event to use for outlook calendar event
+        [Parameter(Mandatory=$true, 
+                    ParameterSetName="Instructor Event",
+                    ValueFromPipeline=$true) ]
+        [InstructorEvent]
+        $InstructorEvent        
     )
     
     begin {
+        # Determine if outlook was running prior to the function call. If not we'll close the application when done.
+        if (Get-Process -name Outlook -ErrorAction SilentlyContinue){$OutlookRunning = $true}
+        try {
+            # Create the outlook application object
+            $outlook = New-Object -ComObject Outlook.application                    
+        }
+        catch {
+            Write-Error "Unable to create outlook objects"
+            return 0
+        }     
+        # Adds the Outlook interop assembly
+        Add-Type -AssemblyName "Microsoft.Office.Interop.Outlook" | Out-Null
+       
+        # The next line adds a type for enumeration. This makes the code more readable.
+        # For example without this you would need to understand all the enumeration values
+        # for the different types like olAppointmentitem = 1...
+        $olFolders = "Microsoft.Office.Interop.Outlook.olDefaultFolders" -as [type]
         
-    }
-    
+        # We need this namespace to enumerate the outlook calendar folders
+        $namespace = $outlook.GetNameSpace("MAPI")
+        # Gets the default calendar folders
+        $DefaultCalFolder = $namespace.GetDefaultFolder($olFolders::olFolderCalendar)
+        # Gets all the folders underneath the default calendar folder
+        $Calendars = @($DefaultCalFolder.folders) + $DefaultCalFolder  
+        # Get the Calendar object associated with the CalendarFolder parameter
+        $Calendar = $Calendars | Where-Object {$_.fullfolderpath -eq $CalendarFolder}
+        # If the calendar doesn't exist, return error
+        if (!$Calendar) { 
+            Write-Error "Can't find Outlook calendar"
+            return $null
+        }      
+        $NumOfDeletedItems = 0
+    }    
     process {
-        
-    }
-    
+        $Subject = "{0} / {1} / {2} / {3} [Current_As_Of: {4}]" -f $InstructorEvent.course,
+                                                                    $InstructorEvent.class,
+                                                                    $InstructorEvent.lesson,
+                                                                    $InstructorEvent.Role,
+                                                                    $InstructorEvent.AsOf.ToString("d")
+        $Calendar.items |
+            Where-Object {$_.Subject -eq $Subject} |
+                ForEach-Object {$_.Delete();$NumOfDeletedItems++}
+    }    
     end {
-        
-    }
-}
+        # If Outlook was not running prior to the function call, quit the application
+        if (!$OutlookRunning){ $outlook.quit() }    
 
-function New-OutlookEvent {
+        # Return how many items deleted
+        $NumOfDeletedItems        
+    }
+} # function remove-outlookevent
+
+function New-OutlookEvent 
+{
     [CmdletBinding()]
     param (
 
@@ -684,8 +816,8 @@ function New-OutlookEvent {
     )
     
     begin {
-        # Determin if outlook was running prior to the function call. If not we'll close the application when done.
-        if (Get-Process -name Outlook){$OutlookRunning = $true}
+        # Determine if outlook was running prior to the function call. If not we'll close the application when done.
+        if (Get-Process -name Outlook -ErrorAction SilentlyContinue){$OutlookRunning = $true}
         try {
             # Create the outlook application object
             $outlook = New-Object -ComObject Outlook.application                    
@@ -697,7 +829,7 @@ function New-OutlookEvent {
         # Adds the Outlook interop assembly
         Add-Type -AssemblyName "Microsoft.Office.Interop.Outlook" | Out-Null
        
-        # The next 3 lines adds types for enumeration. This makes the code more readable.
+        # The next 4 lines adds types for enumeration. This makes the code more readable.
         # For example without this you would need to understand all the enumeration values
         # for the different types like olAppointmentitem = 1...
         $olFolders = "Microsoft.Office.Interop.Outlook.olDefaultFolders" -as [type]
@@ -733,6 +865,8 @@ function New-OutlookEvent {
         if ($categories -notcontains "Support") {
             $namespace.categories.Add("Support", $olColors::olCategoryColorGreen) | Out-Null
         }
+
+        $TotalEventsCreated = 0
     } #Begin
     process {
         # Set values for instructor event
@@ -741,7 +875,7 @@ function New-OutlookEvent {
                                                                              $InstructorEvent.class,
                                                                              $InstructorEvent.lesson,
                                                                              $InstructorEvent.Role,
-                                                                             $InstructorEvent.AsOf
+                                                                             $InstructorEvent.AsOf.ToString("d")
             $Location = $InstructorEvent.room
             $start    = $InstructorEvent.start
             $end      = $InstructorEvent.end
@@ -756,77 +890,22 @@ function New-OutlookEvent {
         $appt.Location   = $location
         $appt.categories = $category
         $appt.body       = $body
-        $appt.close($olClose::olSave)       
+        $appt.close($olClose::olSave)  
+        $TotalEventsCreated++     
     }    
     end {
         # If Outlook was not running prior to the function call, quit the application
-        if (!$OutlookRunning){ $outlook.quit() }        
+        if (!$OutlookRunning){ $outlook.quit() }    
+        $TotalEventsCreated    
     }
 }
-
-function TestingImport 
-{
-    [CmdletBinding()]
-    param (
-        [string[]]
-        $filepath
-    )
-
-    $schedules = @(foreach ($file in $filepath) {
-        $FileObj = Get-Item -Path $file
-        [PSCustomObject]@{
-                path = $file
-                course = (-split $FileObj.Name)[0]
-                class  = (-split $FileObj.Name)[1]
-                AliasFile = "C:\Users\micha\Documents\InputData\NameAliases.csv"              
-            } # pscustomobject        
-        } # foreach file
-    ) # schedules array
-    $schedules | Import-ExcelSched
-
-} # function TestingImport
-
-
-<# #Testing
-$files = @(Get-ChildItem -Path "C:\Users\micha\Documents\InputData\Schedules\CWO" |
-                Select-Object -ExpandProperty FullName
-) # $files array
-
-$files += @(Get-ChildItem -Path "C:\Users\micha\Documents\InputData\Schedules\CVAH" |
-Select-Object -ExpandProperty FullName
-) 
-TestingImport -filepath $files | 
-    Export-csv -Path "C:\Users\micha\Documents\OutputData\events.csv" -Force
-
-[InstructorEvent[]]$events = Import-Csv -Path C:\Users\micha\Documents\OutputData\events.csv
-$report = Measure-Events -events $events -Grouping "Quarterly"
-$report | Out-File -FilePath C:\Users\micha\Documents\OutputData\Quarterly_Analysis.txt -Force
-[InstructorEvent[]]$events = Import-Csv -Path C:\Users\micha\Documents\OutputData\events.csv
-$report = Measure-Events -events $events -grouping "Monthly"
-$report | Out-File -FilePath C:\Users\micha\Documents\OutputData\Monthly_Analysis.txt -Force 
-
-#>
-<# #testing outlook
-$ht = @{
-    CalendarFolder = "\\michael.ralph72@gmail.com\Calendar (This computer only)\WorkGroup1 (This computer only)"
-    Start          = Get-Date
-    End            = (Get-Date).AddHours(2)
-    Subject        = "Test Subject"
-    Location       = "My Office"
-    Category       = "Test basic"
-    Body           = "This was a test"
-}
-
-New-OutlookEvent @ht
-
-# Testing Instructor Events
-[InstructorEvent[]]$events = Import-Csv -Path C:\Users\micha\Documents\OutputData\events.csv
-$events | 
-    Where-Object {$_.Instructor -eq "Mr. Ralph" -and $_.start -ge (Get-Date "1 Jan 2020")} |
-        New-OutlookEvent -calendarfolder "New_Calendar2" #>
-
-
-
-
+<# # Uncomment this when actual module .psm1 is created.
+Export-ModuleMember -Function New-InstructorEvent,
+                              New-OutlookEvent,
+                              Remove-OutlookEvent,
+                              Export-ICS,
+                              Measure-Events,
+                              Import-ExcelSched,
+                              New-InstructorEvent #>
 
 
